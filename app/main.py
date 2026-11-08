@@ -44,15 +44,22 @@ pipeline = joblib.load(MODEL_PATH)
 
 app = FastAPI(title="Teen Phone Addiction Predictor", version="1.0.0")
 
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origin_regex=r"https://.*\.vercel\.app",
+#     allow_origins=[
+#         "http://localhost:3000",
+#         "http://127.0.0.1:3000",
+#         "https://teen-addiction-model-api.onrender.com",
+#     ],
+#     allow_methods=["GET", "POST", "OPTIONS"],
+#     allow_headers=["*"],
+#     allow_credentials=False,
+# )
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"https://.*\.vercel\.app",
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://teen-addiction-model-api.onrender.com",
-    ],
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_origins=["*"],
+    allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=False,
 )
