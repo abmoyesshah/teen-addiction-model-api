@@ -1,26 +1,67 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+import sys
+import os
+import numpy as np
 import pandas as pd
 import joblib
-import os
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.preprocessing import LabelEncoder
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
 
-# ---------- Load model once at startup ----------
+
+# ---------------------------------------------------------------
+# ColumnEncoder MUST be defined before joblib.load() runs.
+# We also register it in __main__ so pickle can find it.
+# ---------------------------------------------------------------
+class ColumnEncoder(BaseEstimator, TransformerMixin):
+    def __init__(self, cat_cols=None):
+        self.cat_cols = cat_cols or []
+
+    def fit(self, X, y=None):
+        self.feature_names_in_ = list(X.columns)
+        self.encoders_ = {}
+        self.fallbacks_ = {}
+        for col in self.cat_cols:
+            le = LabelEncoder().fit(X[col])
+            self.encoders_[col] = le
+            self.fallbacks_[col] = X[col].mode()[0]
+        return self
+
+    def transform(self, X):
+        X = X[self.feature_names_in_].copy()
+        for col in self.cat_cols:
+            X[col] = [self._encode(col, v) for v in X[col]]
+        return X.to_numpy()
+
+    def _encode(self, col, val):
+        le = self.encoders_[col]
+        try:
+            return int(le.transform([val])[0])
+        except (ValueError, TypeError):
+            return int(le.transform([self.fallbacks_[col]])[0])
+
+    def get_feature_names_out(self, input_features=None):
+        return np.array(self.feature_names_in_)
+
+
+# Register under __main__ so pickle finds it
+sys.modules['__main__'].ColumnEncoder = ColumnEncoder
+
+
+# ---------------------------------------------------------------
+# Load pipeline (now works)
+# ---------------------------------------------------------------
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "addiction_model.joblib")
 pipeline = joblib.load(MODEL_PATH)
 
-app = FastAPI(
-    title="Teen Phone Addiction Predictor",
-    version="1.0.0",
-    description="Predicts addiction class (Low / Medium / High) from teen usage data.",
-)
+app = FastAPI(title="Teen Phone Addiction Predictor", version="1.0.0")
 
 
-# ---------- Request schema (matches your dataset columns exactly) ----------
 class TeenInput(BaseModel):
     Age: int = Field(..., ge=10, le=25)
-    Gender: str = Field(..., description="Male, Female, or Other")
-    Location: str = Field(..., description="City name (unseen → falls back to most common)")
-    School_Grade: str = Field(..., description="'9th', '10th', '11th', '12th', ...")
+    Gender: str
+    Location: str
+    School_Grade: str
     Daily_Usage_Hours: float = Field(..., ge=0, le=24)
     Sleep_Hours: float = Field(..., ge=0, le=24)
     Academic_Performance: int = Field(..., ge=0, le=100)
@@ -36,35 +77,14 @@ class TeenInput(BaseModel):
     Time_on_Social_Media: float = Field(..., ge=0, le=24)
     Time_on_Gaming: float = Field(..., ge=0, le=24)
     Time_on_Education: float = Field(..., ge=0, le=24)
-    Phone_Usage_Purpose: str = Field(..., description="Browsing, Gaming, Social Media, Education, ...")
+    Phone_Usage_Purpose: str
     Family_Communication: int = Field(..., ge=0, le=10)
     Weekend_Usage_Hours: float = Field(..., ge=0, le=24)
 
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "Age": 15, "Gender": "Female", "Location": "Hansonfort",
-                "School_Grade": "9th", "Daily_Usage_Hours": 4.0, "Sleep_Hours": 6.1,
-                "Academic_Performance": 78, "Social_Interactions": 5, "Exercise_Hours": 0.1,
-                "Anxiety_Level": 10, "Depression_Level": 3, "Self_Esteem": 6,
-                "Parental_Control": 0, "Screen_Time_Before_Bed": 1.4,
-                "Phone_Checks_Per_Day": 86, "Apps_Used_Daily": 19,
-                "Time_on_Social_Media": 3.6, "Time_on_Gaming": 1.7,
-                "Time_on_Education": 1.2, "Phone_Usage_Purpose": "Browsing",
-                "Family_Communication": 4, "Weekend_Usage_Hours": 8.7,
-            }
-        }
-    }
 
-
-# ---------- Routes ----------
 @app.get("/")
 def root():
-    return {
-        "service": "Teen Phone Addiction Predictor",
-        "docs": "/docs",
-        "health": "/health",
-    }
+    return {"service": "Teen Phone Addiction Predictor", "docs": "/docs"}
 
 
 @app.get("/health")
